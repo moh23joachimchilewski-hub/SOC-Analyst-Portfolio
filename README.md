@@ -203,24 +203,14 @@ Static and sandbox-based malware analysis using:
 
 # Repository Structure
 
-SOC-Analyst-Portfolio
-
-│
-├── 01-Windows-Log-Analysis
-│
-├── 02-Network-Traffic-Analysis
-│
-├── 03-SIEM-Detection-Rules
-│
-├── 04-Phishing-Investigations
-│
-├── 05-Malware-Analysis
-│
-├── 06-Web-Security
-│
-├── 07-Threat-Intelligence
-│
-└── 08-Learning-Notes
+- [01-Windows-Log-Analysis](./01-Windows-Log-Analysis)
+- [02-Network-Traffic-Analysis](./02-Network-Traffic-Analysis)
+- [03-SIEM-Detection-Rules](./03-SIEM-Detection-Rules)
+- [04-Phishing-Investigations](./04-Phishing-Investigations)
+- [05-Malware-Analysis](./05-Malware-Analysis)
+- [06-Web-Security](./06-Web-Security)
+- [07-Threat-Intelligence](./07-Threat-Intelligence)
+- [08-Learning-Notes](./08-Learning-Notes)
 
 # Contact
 
