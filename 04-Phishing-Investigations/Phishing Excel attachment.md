@@ -152,3 +152,10 @@ The attack progresses through three distinct stages:
 The presence of legitimate-looking metadata (creator: `Microsoft Corporation`, timestamps: 2018–2019) combined with the old document creation date (1996) indicates **deliberate metadata spoofing** to evade static analysis. The multi-region hosting (Virgin Islands → Australia → US) and campaign-tracking parameters (`rpid`, `subid1`) suggest this is part of a **coordinated, ongoing phishing/malware campaign**.
 
 **Mitigation:** Systems still running Office versions vulnerable to CVE-2017-11882 should immediately apply security patches or disable the Equation Editor entirely.
+## Technical Description
+
+The analyzed malware is an **Exploit-based Remote Access Trojan (RAT) / Loader** that leverages the **CVE-2017-11882** vulnerability in Microsoft Office Equation Editor to execute arbitrary code without requiring the victim to enable macros.
+
+After successful exploitation, the malware launches PowerShell or Command Prompt, downloads a secondary payload from attacker-controlled infrastructure, and establishes communication with a Command & Control (C2) server. Rather than performing destructive actions immediately, the malware acts as an **initial access loader**, allowing attackers to remotely control the compromised system and deploy additional malicious components.
+
+The sample itself is **not ransomware**. Instead, its primary objective is to establish persistence, facilitate remote access, and prepare the infected host for further malicious activities such as credential theft, surveillance, or the deployment of additional malware.
