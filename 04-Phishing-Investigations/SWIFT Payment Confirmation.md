@@ -8,7 +8,7 @@
 | | |
 |---|---|
 | **What** | A phishing email impersonating a legitimate SWIFT payment notification attempted to lure the recipient into opening a malicious attachment masquerading as a PDF document. |
-| **When** | Email Date: **09 Jun 2020 22:58:27 -0700** |
+| **When** | Email Date: **09 Jun 2020 22:58:27 |
 | **Who** | Display Name: **Mr. James Jackson** (`info@mutawamarine.com`) |
 | **Where** | Originating IP: **192.119.71.157** (HostPapa) |
 | **Why** | Social engineering campaign abusing a fake financial transaction to convince the victim to open a disguised archive attachment. |
