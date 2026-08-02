@@ -167,7 +167,14 @@ Indicators supporting a high-confidence malicious assessment:
 ## Analyst Notes & Caveats
 
 - **Source IP is internal.** `10.10.242.248` is not an internet-facing address, meaning the attacker either already had a foothold inside the network (e.g. compromised VPN, another host) or this traffic was routed through an internal proxy/jump host. The origin of this internal access was not determined in this investigation and requires further scoping.
-- **Unrelated `ubuntu` account activity observed, not attributed to this incident.** The same log source shows `sudo`/`su` activity by a separate local account (`ubuntu`) at 08:56 and 09:10 UTC — both outside the four usernames targeted by the brute force. This activity is noted for completeness but was not investigated further, as there is no evidence connecting it to the `john.smith` compromise chain.
+- **`ubuntu` account `su` activity confirmed isolated and unrelated.** A full-index 
+  search (`index="linux-alert" sourcetype="linux_secure" | search sudo su`) returns 
+  exactly two `sudo`→`su` events in the entire log source: the `john.smith` escalation 
+  documented above, and a single `ubuntu` → root escalation at 09:10:03 — occurring 
+  **before** john.smith's final successful login (09:11:21) and privilege escalation 
+  (09:11:28). The ubuntu event's timing precludes it from being a follow-on action by 
+  the same attacker session and is treated as unrelated background/administrative 
+  activity, though its exact legitimacy was not independently verified.
 - **`david.miller` validity unconfirmed.** Unlike `emma.johnson` and `sarah.williams`, the reviewed evidence did not explicitly confirm whether `david.miller` is a valid or invalid account on this host.
 
 ---
