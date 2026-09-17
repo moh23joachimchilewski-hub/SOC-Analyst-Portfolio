@@ -70,6 +70,7 @@ Sep 13 11:26:09 wazuhservertest sshd[3548]: pam_unix(sshd:auth): authentication 
 Sep 13 11:26:09 wazuhservertest sshd[3547]: pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=192.168.56.1 user=pendragon
 Sep 13 11:26:09 wazuhservertest sshd[3551]: pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=192.168.56.1 user=pendragon
 ```
+<img width="800" height="247" alt="image" src="https://github.com/user-attachments/assets/b238bef7-2434-4c45-904a-e51dfe20f096" />
 <img width="1920" height="963" alt="image" src="https://github.com/user-attachments/assets/aa14e9b4-d6af-4376-9804-d241bc7667bb" />
 <img width="1920" height="952" alt="image" src="https://github.com/user-attachments/assets/4ae895ff-6b6e-4c1d-b3e7-08b6df680bf1" />
 
