@@ -83,7 +83,7 @@ sigma convert -t splunk -p splunk_cim first-detection.yml
 ```
 
 ```
-Processes.process_path IN ("*\\whoami.exe", "*\\ipconfig.exe", "*\\systeminfo.exe") OR (Processes.process_path="*\\net.exe" Processes.process="*-' user' -' group' -' localgroup'*")
+Processes.process_path IN ("*\\whoami.exe", "*\\ipconfig.exe", "*\\systeminfo.exe") OR (Processes.process_path="*\\net.exe" Processes.process IN ("*user*", "*group*", "*localgroup*"))
 ```
 
 ### b) Microsoft XDR (Kusto / KQL, pipeline: `microsoft_xdr`)
@@ -94,7 +94,7 @@ sigma convert -t kusto -p microsoft_xdr first-detection.yml
 
 ```
 DeviceProcessEvents
-| where (FolderPath endswith "\\whoami.exe" or FolderPath endswith "\\ipconfig.exe" or FolderPath endswith "\\systeminfo.exe") or (FolderPath endswith "\\net.exe" and ProcessCommandLine contains "-' user' -' group' -' localgroup'")
+| where (FolderPath endswith "\\whoami.exe" or FolderPath endswith "\\ipconfig.exe" or FolderPath endswith "\\systeminfo.exe") or (FolderPath endswith "\\net.exe" and (ProcessCommandLine contains "user" or ProcessCommandLine contains "group" or ProcessCommandLine contains "localgroup"))
 ```
 
 ### c) Elastic (EQL, pipeline: `ecs_windows`)
@@ -104,9 +104,10 @@ sigma convert -t eql -p ecs_windows first-detection.yml
 ```
 
 ```
-any where (process.executable like~ ("*\\whoami.exe", "*\\ipconfig.exe", "*\\systeminfo.exe")) or (process.executable:"*\\net.exe" and process.command_line:"*-' user' -' group' -' localgroup'*")
+any where (process.executable like~ ("*\\whoami.exe", "*\\ipconfig.exe", "*\\systeminfo.exe")) or (process.executable:"*\\net.exe" and (process.command_line like~ ("*user*", "*group*", "*localgroup*")))
 ```
-<img width="1920" height="783" alt="Zrzut ekranu (758)" src="https://github.com/user-attachments/assets/a401443a-0e68-48b3-9a8c-8cd5f73a6b09" />
+<img width="1920" height="795" alt="Zrzut ekranu (759)" src="https://github.com/user-attachments/assets/39dc9f7e-9082-47ce-9549-bf821376984a" />
+
 
 
 ## Problemy napotkane podczas pisania (do zapamiętania na przyszłość)
