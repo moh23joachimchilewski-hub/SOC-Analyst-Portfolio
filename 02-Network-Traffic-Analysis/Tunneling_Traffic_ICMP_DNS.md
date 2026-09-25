@@ -1,4 +1,4 @@
-# Network Traffic Analysis — ICMP & DNS Covert Tunneling
+# Network Traffic Analysis - ICMP & DNS Covert Tunneling
 
 > **Tool:** Wireshark
 > **Detection Type:** Command & Control / Data Exfiltration (Protocol Tunneling)
@@ -9,13 +9,13 @@ This report covers two related but distinct anomalous traffic patterns identifie
 
 ---
 
-## Part 1 — ICMP Tunneling (SSH-over-ICMP)
+## Part 1 - ICMP Tunneling (SSH-over-ICMP)
 
 ### 5W Analysis
 
 | Question | Answer |
 |---|---|
-| **Who** | Client: `192.168.154.131` → Server: `192.168.154.132` |
+| **Who** | Client: `192.168.154.131` -> Server: `192.168.154.132` |
 | **What** | An SSH session tunneled inside ICMP Echo Request/Reply packets, bypassing standard TCP/22 monitoring |
 | **When** | Sustained periodic ICMP traffic beginning at capture start (`T+0.000432s`), continuing at ~1-second intervals |
 | **Where** | ICMP protocol (network layer), disguising an inner TCP/22 (SSH) session |
@@ -25,7 +25,7 @@ This report covers two related but distinct anomalous traffic patterns identifie
 
 ### Detection Logic (Wireshark Display Filters)
 
-**Initial broad filter — isolate ICMP traffic:**
+**Initial broad filter - isolate ICMP traffic:**
 ```
 icmp
 ```
@@ -39,36 +39,38 @@ icmp and data.len > 64
 
 ### Investigation
 
-**Step 1 — Baseline anomaly (packet list level).**
+**Step 1 - Baseline anomaly (packet list level).**
 Filtering on `icmp` alone immediately shows a sustained stream of Echo Request packets from `192.168.154.131` to `192.168.154.132` at regular ~1-second intervals, all sharing:
-- **Identifier:** fixed at `0xfeff` (BE) / `0xfffe` (LE) — never varies
-- **Sequence number:** fixed at `0/0` — never increments
+- **Identifier:** fixed at `0xfeff` (BE) / `0xfffe` (LE) - never varies
+- **Sequence number:** fixed at `0/0` - never increments
 
-Standard OS ping utilities increment the sequence number on every request and typically vary the identifier per process. A **constant identifier and sequence across an entire session** is not normal ping behavior — it is characteristic of tooling that repurposes these fields as session/state markers rather than using them for their RFC 792 purpose.
+Standard OS ping utilities increment the sequence number on every request and typically vary the identifier per process. A **constant identifier and sequence across an entire session** is not normal ping behavior - it is characteristic of tooling that repurposes these fields as session/state markers rather than using them for their RFC 792 purpose.
 
-**Step 2 — Payload size anomaly.**
-Applying `icmp and data.len > 64` reveals that many of these "ping" packets carry payloads far larger than a standard 32–64 byte ICMP Echo (up to **1075 bytes total frame length / 1033 bytes of ICMP data** observed, e.g. packet #242). This volume of data has no legitimate purpose in a diagnostic ping and strongly suggests the ICMP data field is being used to carry an encapsulated payload.
+**[SCREENSHOT HERE - `icmp-tunnel.pcap` filtered on `icmp`, showing the sustained stream of Echo Request packets with fixed `id=0xfeff, seq=0/0`, annotated "Anomalia - kazdy sequence numer jest taki sam => seq=0/0 (standardowo powinien rosnac z kazdym ping request), dodatkowo ping requesty w regularnych 1 sekundowych odstepach"]**
 
-**Step 3 — Payload content: confirming SSH.**
+**Step 2 - Payload size anomaly.**
+Applying `icmp and data.len > 64` reveals that many of these "ping" packets carry payloads far larger than a standard 32-64 byte ICMP Echo (up to **1075 bytes total frame length / 1033 bytes of ICMP data** observed, e.g. packet #242). This volume of data has no legitimate purpose in a diagnostic ping and strongly suggests the ICMP data field is being used to carry an encapsulated payload.
+
+**[SCREENSHOT HERE - `icmp-tunnel.pcap` filtered on `icmp and data.len >64`, annotated "Szukamy podejrzanie duzych ICMP z duzym payloadem, normalnie ICMP Payload jest maly bo to protokol diagnostyczny, duzy payload = podejrzane"]**
+
+**[SCREENSHOT HERE - `icmp-tunnel.pcap` filtered on `data.len > 64 and icmp`, packet #242 selected showing Length 1075, expanded ICMP header with `Checksum: 0x0000 incorrect` and `[No response seen]`, annotated "Bardzo duzy ICMP payload 1075 bajtow, polaczony z brakiem ICMP response na ICMP request"]**
+
+**Step 3 - Payload content: confirming SSH.**
 Inspecting the raw bytes of the oversized ICMP data field reveals a **fully-formed, nested IP packet**:
 
 ```
 ICMP Data (offset 0x002a onward):
 45 00 03 4c 39 6c 40 00 40 06 e7 7f 0a 5f 01 01 0a 5f 01 02 ...
-└┬┘          └┬┘          └┬┘  └┬┘          └───┬───┘ └───┬───┘
- │            │            │    │               │          │
- IPv4/IHL   Total Len   Flags  Proto=6(TCP)   Src: 10.95.1.1  Dst: 10.95.1.2
+IPv4/IHL   Total Len   Flags  Proto=6(TCP)   Src: 10.95.1.1  Dst: 10.95.1.2
 ```
 
 Immediately followed by a TCP header:
 ```
 c8 8b 00 16 31 7d 53 ca 0e 1b bf cb 80 18 ...
-└┬┘  └┬┘
- │    └── Dst Port: 0x0016 = 22 (SSH)
- └────── Src Port: 0xc88b = 51339
+Src Port: 0xc88b = 51339   Dst Port: 0x0016 = 22 (SSH)
 ```
 
-And immediately after the TCP header, the payload contains **plaintext ASCII matching an SSH2 `KEXINIT` (Key Exchange Init) message** — the algorithm-negotiation list every SSH connection sends at the start of a handshake:
+And immediately after the TCP header, the payload contains **plaintext ASCII matching an SSH2 `KEXINIT` (Key Exchange Init) message** - the algorithm-negotiation list every SSH connection sends at the start of a handshake:
 
 ```
 diffie-hellman-group-exchange-sha256,diffie-hellman-group-exchange-sha1,
@@ -79,9 +81,9 @@ hmac-md5,hmac-sha1,umac-64@openssh.com,... ...
 none,zlib@openssh.com,zlib
 ```
 
-This sequence — key exchange algorithms, host key types (`ssh-rsa`/`ssh-dss`), cipher suites, MAC algorithms, and compression options — is **unique and unmistakable to the SSH2 protocol handshake**. There is no other protocol that produces this exact string set. This is the direct, conclusive evidence that the tunneled traffic is SSH.
+This sequence - key exchange algorithms, host key types (`ssh-rsa`/`ssh-dss`), cipher suites, MAC algorithms, and compression options - is **unique and unmistakable to the SSH2 protocol handshake**. There is no other protocol that produces this exact string set. This is the direct, conclusive evidence that the tunneled traffic is SSH.
 
-**Conclusion:** the client at `192.168.154.131` is running a full SSH session between an inner virtual network (`10.95.1.1` ↔ `10.95.1.2`, TCP/22) encapsulated inside ICMP Echo Request packets exchanged between `192.168.154.131` and `192.168.154.132`. This is a classic ICMP tunneling pattern (tools such as `ptunnel`/`icmptunnel` operate this way), used to bypass network controls that only inspect/restrict standard TCP/22 traffic.
+**Conclusion:** the client at `192.168.154.131` is running a full SSH session between an inner virtual network (`10.95.1.1` <-> `10.95.1.2`, TCP/22) encapsulated inside ICMP Echo Request packets exchanged between `192.168.154.131` and `192.168.154.132`. This is a classic ICMP tunneling pattern (tools such as `ptunnel`/`icmptunnel` operate this way), used to bypass network controls that only inspect/restrict standard TCP/22 traffic.
 
 ---
 
@@ -99,13 +101,13 @@ This sequence — key exchange algorithms, host key types (`ssh-rsa`/`ssh-dss`),
 
 ---
 
-## Part 2 — DNS Tunneling (dnscat)
+## Part 2 - DNS Tunneling (dnscat)
 
 ### 5W Analysis
 
 | Question | Answer |
 |---|---|
-| **Who** | Client: `192.168.253.1` → Server: `192.168.253.128` |
+| **Who** | Client: `192.168.253.1` -> Server: `192.168.253.128` |
 | **What** | DNS queries using `dnscat`-style hex-encoded subdomains, rotating across MX, TXT, and CNAME record types, ultimately routed to a confirmed external C2 domain |
 | **When** | High-frequency DNS queries at sub-second intervals (multiple exchanges per second) |
 | **Where** | DNS protocol (UDP/53) |
@@ -120,7 +122,7 @@ This sequence — key exchange algorithms, host key types (`ssh-rsa`/`ssh-dss`),
 dns
 ```
 
-**Combined filter — tool signature + anomalous query length (used in this investigation):**
+**Combined filter - tool signature + anomalous query length (used in this investigation):**
 ```
 dns contains "dnscat" and dns.qry.name.len > 15
 ```
@@ -129,10 +131,12 @@ dns contains "dnscat" and dns.qry.name.len > 15
 
 ### Investigation
 
-**Step 1 — Tool signature identification.**
-Filtering with `dns contains "dnscat" and dns.qry.name.len > 15` returns a dense, rapid sequence of DNS queries and responses between `192.168.253.1` and `192.168.253.128`. The literal string `dnscat` appearing as a query subdomain label is a direct tool signature — `dnscat`/`dnscat2` is a widely-known DNS-based C2/tunneling tool.
+**Step 1 - Tool signature identification.**
+Filtering with `dns contains "dnscat" and dns.qry.name.len > 15` returns a dense, rapid sequence of DNS queries and responses between `192.168.253.1` and `192.168.253.128`. The literal string `dnscat` appearing as a query subdomain label is a direct tool signature - `dnscat`/`dnscat2` is a widely-known DNS-based C2/tunneling tool.
 
-**Step 2 — Encoded payload in subdomain.**
+**[SCREENSHOT HERE - `dns.pcap` filtered on `dns contains "dnscat" and dns.qry.name.len > 15`, showing the dense sequence of MX/TXT/CNAME queries and responses, annotated "Duzo dns requestow wykorzystujacych dnscat, polaczone z duzym rozmiarem pakietu - potencjalne encoded dane, mozliwa komunikacja C2"]**
+
+**Step 2 - Encoded payload in subdomain.**
 A representative query:
 ```
 Name: dnscat.3b80015aaf45c2a02977230080b68d0ea3
@@ -141,12 +145,14 @@ Name Length: 41
 Label Count: 2
 ```
 
-The subdomain segment (`3b80015aaf45c2a02977230080b68d0ea3`) is a hex-encoded string, not a real hostname — this is the classic dnscat pattern of encoding session/data content into subdomain labels rather than sending a genuine domain lookup.
+The subdomain segment (`3b80015aaf45c2a02977230080b68d0ea3`) is a hex-encoded string, not a real hostname - this is the classic dnscat pattern of encoding session/data content into subdomain labels rather than sending a genuine domain lookup.
 
-**Step 3 — Record type rotation.**
-Across the capture, queries cycle through **MX**, **TXT**, and **CNAME** record types for structurally similar encoded subdomains. Legitimate lookups for a single service don't typically rotate record types like this — dnscat/dnscat2 deliberately varies query types to maximize channel bandwidth and resilience against filtering of any single record type.
+**[SCREENSHOT HERE - `dns.pcap` filtered on `dns contains "dnscat"`, expanded query fields showing `Name: dnscat.3b80015aaf45c2a02977230080b68d0ea3`, `Type: MX`, annotated "query zawiera dnscat - narzedzie uzywane do tunelowania przez DNS, potencjalne C2 connection"]**
 
-**Step 4 — C2 domain confirmed directly in packet payload.**
+**Step 3 - Record type rotation.**
+Across the capture, queries cycle through **MX**, **TXT**, and **CNAME** record types for structurally similar encoded subdomains. Legitimate lookups for a single service don't typically rotate record types like this - dnscat/dnscat2 deliberately varies query types to maximize channel bandwidth and resilience against filtering of any single record type.
+
+**Step 4 - C2 domain confirmed directly in packet payload.**
 A separate query packet (raw hex) shows the full query name in cleartext ASCII:
 
 ```
@@ -154,7 +160,7 @@ Hex offset 0x0120: 09 64 61 74 61 65 78 66 69 6c 03 63 6f 6d 00
 ASCII:              . d  a  t  a  e  x  f  i  l  .  c  o  m
 ```
 
-The `09` and `03` bytes preceding `dataexfil` and `com` are DNS label-length prefixes (9 characters, then 3 characters) — standard DNS message encoding, confirming the parsed FQDN. The full query name for this packet:
+The `09` and `03` bytes preceding `dataexfil` and `com` are DNS label-length prefixes (9 characters, then 3 characters) - standard DNS message encoding, confirming the parsed FQDN. The full query name for this packet:
 
 ```
 F2BB01B0DEBCBAF89BF5CA00565428D725AE39601439DCB67A5541091207088.
@@ -164,7 +170,7 @@ E9BD4A82EBFD63ABB64A098F2564D3910D6EBCAAA.
 dataexfil.com
 ```
 
-This confirms **`dataexfil[.]com`** as the parent domain receiving the tunneled traffic. Each of the four long hex-encoded labels (up to 63 characters — the DNS label length maximum) represents a chunk of encoded data/session payload, consistent with dnscat2's session/data encoding scheme, which splits larger payloads across multiple labels within a single query due to DNS label-length limits (RFC 1035, 63 bytes per label).
+This confirms **`dataexfil[.]com`** as the parent domain receiving the tunneled traffic. Each of the four long hex-encoded labels (up to 63 characters - the DNS label length maximum) represents a chunk of encoded data/session payload, consistent with dnscat2's session/data encoding scheme, which splits larger payloads across multiple labels within a single query due to DNS label-length limits (RFC 1035, 63 bytes per label).
 
 ---
 
@@ -186,16 +192,16 @@ This confirms **`dataexfil[.]com`** as the parent domain receiving the tunneled 
 
 | Tactic | Technique | Description |
 |---|---|---|
-| Command and Control | T1572 | Protocol Tunneling — SSH session encapsulated inside ICMP Echo packets |
-| Command and Control | T1071.004 | Application Layer Protocol: DNS — dnscat covert channel over standard DNS queries |
-| Command and Control / Exfiltration | T1132 | Data Encoding — hex-encoded payload embedded in DNS subdomain labels |
-| Exfiltration | T1048 | Exfiltration Over Alternative Protocol — data moved via ICMP/DNS rather than a standard, monitored channel |
+| Command and Control | T1572 | Protocol Tunneling - SSH session encapsulated inside ICMP Echo packets |
+| Command and Control | T1071.004 | Application Layer Protocol: DNS - dnscat covert channel over standard DNS queries |
+| Command and Control / Exfiltration | T1132 | Data Encoding - hex-encoded payload embedded in DNS subdomain labels |
+| Exfiltration | T1048 | Exfiltration Over Alternative Protocol - data moved via ICMP/DNS rather than a standard, monitored channel |
 
 ---
 
 ## Analyst Notes & Caveats
 
-- **ICMP checksum anomalies noted but not treated as a primary indicator.** Several ICMP packets in the capture show `Checksum: 0x0000 incorrect`. While this can indicate raw/custom-crafted packets (consistent with a tunneling tool), it is also commonly caused by checksum offloading (the NIC calculates the checksum at send time, after the packet was already captured) — a frequent, benign artifact in packet captures. This was **not** relied upon as standalone evidence; the definitive finding is the embedded SSH KEXINIT payload documented above.
+- **ICMP checksum anomalies noted but not treated as a primary indicator.** Several ICMP packets in the capture show `Checksum: 0x0000 incorrect`. While this can indicate raw/custom-crafted packets (consistent with a tunneling tool), it is also commonly caused by checksum offloading (the NIC calculates the checksum at send time, after the packet was already captured) - a frequent, benign artifact in packet captures. This was **not** relied upon as standalone evidence; the definitive finding is the embedded SSH KEXINIT payload documented above.
 - **"No response seen" labels on ICMP requests are a byproduct of the fixed identifier/sequence, not necessarily true packet loss.** Wireshark matches ICMP request/reply pairs using the identifier and sequence number; since both are held constant throughout the session, Wireshark's matching heuristic frequently fails to pair requests with replies even when a reply may have occurred. This should not be read as literal network non-responsiveness.
 
 ---
@@ -213,6 +219,6 @@ This confirms **`dataexfil[.]com`** as the parent domain receiving the tunneled 
 
 ## Conclusion
 
-This investigation identified two independent covert channel techniques within the reviewed packet captures. The first is an SSH session fully encapsulated inside ICMP Echo Request packets between `192.168.154.131` and `192.168.154.132`, confirmed conclusively by the presence of an embedded IPv4/TCP header (destination port 22) followed by a plaintext SSH2 KEXINIT algorithm-negotiation string inside the oversized ICMP payload. The second is a DNS-based tunnel consistent with the `dnscat` tool, in which session and data payloads are hex-encoded into subdomain labels and rotated across MX, TXT, and CNAME queries, ultimately routed to the external domain `dataexfil[.]com` — confirmed directly from the raw packet bytes of a captured query.
+This investigation identified two independent covert channel techniques within the reviewed packet captures. The first is an SSH session fully encapsulated inside ICMP Echo Request packets between `192.168.154.131` and `192.168.154.132`, confirmed conclusively by the presence of an embedded IPv4/TCP header (destination port 22) followed by a plaintext SSH2 KEXINIT algorithm-negotiation string inside the oversized ICMP payload. The second is a DNS-based tunnel consistent with the `dnscat` tool, in which session and data payloads are hex-encoded into subdomain labels and rotated across MX, TXT, and CNAME queries, ultimately routed to the external domain `dataexfil[.]com` - confirmed directly from the raw packet bytes of a captured query.
 
 Both techniques share a common purpose: abusing protocols (ICMP, DNS) that are frequently under-inspected or implicitly trusted by network security controls, in order to establish command-and-control channels or exfiltrate data while evading detection focused on conventional TCP-based traffic.
