@@ -46,14 +46,20 @@ Filtering on `icmp` alone immediately shows a sustained stream of Echo Request p
 
 Standard OS ping utilities increment the sequence number on every request and typically vary the identifier per process. A **constant identifier and sequence across an entire session** is not normal ping behavior - it is characteristic of tooling that repurposes these fields as session/state markers rather than using them for their RFC 792 purpose.
 
-**[SCREENSHOT HERE - `icmp-tunnel.pcap` filtered on `icmp`, showing the sustained stream of Echo Request packets with fixed `id=0xfeff, seq=0/0`, annotated "Anomalia - kazdy sequence numer jest taki sam => seq=0/0 (standardowo powinien rosnac z kazdym ping request), dodatkowo ping requesty w regularnych 1 sekundowych odstepach"]**
+<img width="1920" height="829" alt="Zrzut ekranu (429)" src="https://github.com/user-attachments/assets/ba2eb4c4-1561-4a26-a6e8-b79018583a31" />
+
+
 
 **Step 2 - Payload size anomaly.**
 Applying `icmp and data.len > 64` reveals that many of these "ping" packets carry payloads far larger than a standard 32-64 byte ICMP Echo (up to **1075 bytes total frame length / 1033 bytes of ICMP data** observed, e.g. packet #242). This volume of data has no legitimate purpose in a diagnostic ping and strongly suggests the ICMP data field is being used to carry an encapsulated payload.
 
-**[SCREENSHOT HERE - `icmp-tunnel.pcap` filtered on `icmp and data.len >64`, annotated "Szukamy podejrzanie duzych ICMP z duzym payloadem, normalnie ICMP Payload jest maly bo to protokol diagnostyczny, duzy payload = podejrzane"]**
+<img width="1920" height="827" alt="Zrzut ekranu (430)" src="https://github.com/user-attachments/assets/72506401-500d-4141-8df0-0f7d5f11bbd1" />
 
-**[SCREENSHOT HERE - `icmp-tunnel.pcap` filtered on `data.len > 64 and icmp`, packet #242 selected showing Length 1075, expanded ICMP header with `Checksum: 0x0000 incorrect` and `[No response seen]`, annotated "Bardzo duzy ICMP payload 1075 bajtow, polaczony z brakiem ICMP response na ICMP request"]**
+
+
+<img width="1920" height="828" alt="Zrzut ekranu (432)" src="https://github.com/user-attachments/assets/e17327d5-b3fe-4350-adc3-31eff52191f9" />
+
+
 
 **Step 3 - Payload content: confirming SSH.**
 Inspecting the raw bytes of the oversized ICMP data field reveals a **fully-formed, nested IP packet**:
@@ -134,7 +140,9 @@ dns contains "dnscat" and dns.qry.name.len > 15
 **Step 1 - Tool signature identification.**
 Filtering with `dns contains "dnscat" and dns.qry.name.len > 15` returns a dense, rapid sequence of DNS queries and responses between `192.168.253.1` and `192.168.253.128`. The literal string `dnscat` appearing as a query subdomain label is a direct tool signature - `dnscat`/`dnscat2` is a widely-known DNS-based C2/tunneling tool.
 
-**[SCREENSHOT HERE - `dns.pcap` filtered on `dns contains "dnscat" and dns.qry.name.len > 15`, showing the dense sequence of MX/TXT/CNAME queries and responses, annotated "Duzo dns requestow wykorzystujacych dnscat, polaczone z duzym rozmiarem pakietu - potencjalne encoded dane, mozliwa komunikacja C2"]**
+<img width="1920" height="822" alt="Zrzut ekranu (431)" src="https://github.com/user-attachments/assets/965e3fdc-44b5-426e-bc1a-729234087f67" />
+
+
 
 **Step 2 - Encoded payload in subdomain.**
 A representative query:
@@ -147,7 +155,9 @@ Label Count: 2
 
 The subdomain segment (`3b80015aaf45c2a02977230080b68d0ea3`) is a hex-encoded string, not a real hostname - this is the classic dnscat pattern of encoding session/data content into subdomain labels rather than sending a genuine domain lookup.
 
-**[SCREENSHOT HERE - `dns.pcap` filtered on `dns contains "dnscat"`, expanded query fields showing `Name: dnscat.3b80015aaf45c2a02977230080b68d0ea3`, `Type: MX`, annotated "query zawiera dnscat - narzedzie uzywane do tunelowania przez DNS, potencjalne C2 connection"]**
+<img width="1920" height="830" alt="Zrzut ekranu (433)" src="https://github.com/user-attachments/assets/ccee34ec-e89f-4e25-a844-2ec075f543eb" />
+
+
 
 **Step 3 - Record type rotation.**
 Across the capture, queries cycle through **MX**, **TXT**, and **CNAME** record types for structurally similar encoded subdomains. Legitimate lookups for a single service don't typically rotate record types like this - dnscat/dnscat2 deliberately varies query types to maximize channel bandwidth and resilience against filtering of any single record type.
