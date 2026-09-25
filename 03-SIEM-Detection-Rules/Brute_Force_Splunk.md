@@ -1,4 +1,4 @@
-# SIEM Detection Report — SSH Brute Force Leading to Privilege Escalation and Persistence (Linux)
+# SIEM Detection Report - SSH Brute Force Leading to Privilege Escalation and Persistence (Linux)
 
 > **Platform:** Splunk
 > **Log Source:** `linux_secure` (auth.log)
@@ -10,7 +10,7 @@
 
 ## Executive Summary
 
-A Brute Force Activity Detection alert flagged SSH authentication activity against host `tryhackme-2404` from internal IP `10.10.242.248`. Investigation in Splunk confirmed a sustained SSH brute force campaign against the `john.smith` account — 500 failed password attempts within an approximately 5-minute window, interspersed with 3 successful authentications. Shortly after the final successful login, `john.smith` escalated privileges to `root` via `su`, and a new local account (`system-utm`) was created one minute later for persistence.
+A Brute Force Activity Detection alert flagged SSH authentication activity against host `tryhackme-2404` from internal IP `10.10.242.248`. Investigation in Splunk confirmed a sustained SSH brute force campaign against the `john.smith` account - 500 failed password attempts within an approximately 5-minute window, interspersed with 3 successful authentications. Shortly after the final successful login, `john.smith` escalated privileges to `root` via `su`, and a new local account (`system-utm`) was created one minute later for persistence.
 
 Because the source IP is an internal address, this activity is consistent with an attacker already present inside the network (e.g. via a prior VPN compromise or other foothold), rather than a purely external, internet-facing brute force.
 
@@ -21,8 +21,8 @@ Because the source IP is an internal address, this activity is consistent with a
 | Question | Answer |
 |---|---|
 | **Who** | Compromised account: `john.smith`; source IP `10.10.242.248` (internal) |
-| **What** | SSH brute force → successful login → privilege escalation to root (`su`) → new local account created for persistence |
-| **When** | 17 September 2025, ~09:00 (alert) — 09:12 (persistence established) |
+| **What** | SSH brute force -> successful login -> privilege escalation to root (`su`) -> new local account created for persistence |
+| **When** | 17 September 2025, ~09:00 (alert) - 09:12 (persistence established) |
 | **Where** | Host `tryhackme-2404`, SSH service (`sshd`) |
 | **Why** | Consistent with an attacker establishing privileged, persistent access following credential compromise |
 
@@ -44,19 +44,23 @@ Because the source IP is an internal address, this activity is consistent with a
 
 | Time (UTC) | Event |
 |---|---|
-| 09:00:18 – 09:00:47 | Failed SSH logins for invalid users (`emma.johnson`, `sarah.williams`) from 10.10.242.248 — consistent with username enumeration preceding the targeted brute force |
-| ~09:06:00 – 09:06:35 | Sustained failed password attempts against `john.smith` (500 total observed across the campaign) |
+| 09:00:18 - 09:00:47 | Failed SSH logins for invalid users (`emma.johnson`, `sarah.williams`) from 10.10.242.248 - consistent with username enumeration preceding the targeted brute force |
+| ~09:06:00 - 09:06:35 | Sustained failed password attempts against `john.smith` (500 total observed across the campaign) |
 | 09:06:01.591 | First successful login: `Accepted password for john.smith ... port 35932` |
 | 09:07:25.040 | Second successful login: `Accepted password for john.smith ... port 47336` |
 | 09:11:21.177 | Third (final) successful login: `Accepted password for john.smith ... port 53244` |
-| 09:11:28.976 | `sudo: john.smith : TTY=pts/1 ; PWD=/home/john.smith ; USER=root ; COMMAND=/usr/bin/su` — privilege escalation to root |
-| 09:12:10.914 | `useradd[3430]: new user: name=system-utm, UID=1002, GID=1002, home=/home/system-utm, shell=/bin/bash` — persistence account created |
+| 09:11:28.976 | `sudo: john.smith : TTY=pts/1 ; PWD=/home/john.smith ; USER=root ; COMMAND=/usr/bin/su` - privilege escalation to root |
+| 09:12:10.914 | `useradd[3430]: new user: name=system-utm, UID=1002, GID=1002, home=/home/system-utm, shell=/bin/bash` - persistence account created |
 
-**Brute force duration:** ~5 minutes (first observed failed attempts ~09:06:00 → final successful login 09:11:21), matching the confirmed 500 failed attempts against a single account in a short, high-frequency window.
+**Brute force duration:** ~5 minutes (first observed failed attempts ~09:06:00 -> final successful login 09:11:21), matching the confirmed 500 failed attempts against a single account in a short, high-frequency window.
+
+<img width="1920" height="866" alt="Zrzut ekranu (404)" src="https://github.com/user-attachments/assets/7b80c98e-683a-47be-9a86-303492138944" />
+<img width="1920" height="865" alt="Zrzut ekranu (405)" src="https://github.com/user-attachments/assets/1cf00bb6-7dc1-4ddf-b3b6-eae731116c91" />
+
 
 ---
 
-## Detection Logic (SPL — Splunk)
+## Detection Logic (SPL - Splunk)
 
 **Scope activity by source IP and classify login outcomes per user:**
 ```spl
@@ -76,56 +80,92 @@ index="linux-alert" sourcetype="linux_secure" "10.10.242.248"
 | sarah.williams | 3 | Failed | 10.10.242.248 | tryhackme-2404 | sshd |
 | emma.johnson | 2 | Failed | 10.10.242.248 | tryhackme-2404 | sshd |
 
-`john.smith` is the only targeted account with any `Accepted` result — confirming this was the sole successfully compromised account. 503 total events − 3 successful logins = **500 failed attempts**, internally consistent with the confirmed finding.
+`john.smith` is the only targeted account with any `Accepted` result - confirming this was the sole successfully compromised account. 503 total events - 3 successful logins = **500 failed attempts**, internally consistent with the confirmed finding.
+
+<img width="1920" height="868" alt="Zrzut ekranu (408)" src="https://github.com/user-attachments/assets/01607132-8036-4f70-857e-a276567bb64a" />
+<img width="1920" height="862" alt="Zrzut ekranu (409)" src="https://github.com/user-attachments/assets/9ecf0ee6-3434-4cb3-8bbe-734ffb39291a" />
+
 
 **Confirm persistence (account creation):**
 ```spl
 index="linux-alert" sourcetype="linux_secure" useradd
 ```
 
+---
+
+## Evidence
+
+### Brute Force - Failed Authentication
+
+```
 Failed password for john.smith from 10.10.242.248 port 36706 ssh2
 Failed password for john.smith from 10.10.242.248 port 36702 ssh2
 Failed password for john.smith from 10.10.242.248 port 35976 ssh2
+```
 
-High-frequency, closely-spaced failed attempts (sub-second to few-second intervals) from a single source IP against a single username — a clear brute force signature.
+High-frequency, closely-spaced failed attempts (sub-second to few-second intervals) from a single source IP against a single username - a clear brute force signature.
+
+<img width="1920" height="868" alt="Zrzut ekranu (406)" src="https://github.com/user-attachments/assets/d32c4481-10ea-4a1c-9865-db9e412a7c15" />
+
 
 ### Successful Compromise
+
+```
 Accepted password for john.smith from 10.10.242.248 port 35932 ssh2 (09:06:01.591)
 Accepted password for john.smith from 10.10.242.248 port 47336 ssh2 (09:07:25.040)
 Accepted password for john.smith from 10.10.242.248 port 53244 ssh2 (09:11:21.177)
+```
+
+<img width="1920" height="865" alt="Zrzut ekranu (407)" src="https://github.com/user-attachments/assets/e5423f5f-ddaf-4d4c-bf44-9f588c1ae428" />
+
 
 ### Privilege Escalation
+
+```
 sudo: john.smith : TTY=pts/1 ; PWD=/home/john.smith ; USER=root ; COMMAND=/usr/bin/su
+```
 
 `john.smith` used `su` (via `sudo` invocation of `/usr/bin/su`) to escalate to `root`, 7.8 seconds after the final successful SSH login.
 
-### Persistence
-useradd[3430]: new user: name=system-utm, UID=1002, GID=1002, home=/home/system-utm, shell=/bin/bash, from=/dev/pts/3
+<img width="1920" height="859" alt="Zrzut ekranu (411)" src="https://github.com/user-attachments/assets/db58beec-e0df-4e60-8c0f-a9420eea1e35" />
 
-A new local account, `system-utm`, was created ~42 seconds after the privilege escalation event — from a pty session (`/dev/pts/3`), consistent with interactive attacker activity rather than an automated script artifact.
+
+### Persistence
+
+```
+useradd[3430]: new user: name=system-utm, UID=1002, GID=1002, home=/home/system-utm, shell=/bin/bash, from=/dev/pts/3
+```
+
+A new local account, `system-utm`, was created ~42 seconds after the privilege escalation event - from a pty session (`/dev/pts/3`), consistent with interactive attacker activity rather than an automated script artifact.
+
+<img width="1920" height="859" alt="Zrzut ekranu (410)" src="https://github.com/user-attachments/assets/6fe81054-7c30-4a1c-8feb-c661535ac4ec" />
+
 
 ---
 
 ## Attack Chain
+
+```
 Source IP: 10.10.242.248 (internal)
-│
-▼
+        |
+        v
 Username enumeration (invalid users: emma.johnson, sarah.williams)
-│
-▼
+        |
+        v
 SSH Brute Force against john.smith
 (500 failed attempts, ~5 min window)
-│
-▼
+        |
+        v
 Successful Authentication (3x, final at 09:11:21)
-│
-▼
-Privilege Escalation: su → root
+        |
+        v
+Privilege Escalation: su -> root
 (09:11:28)
-│
-▼
+        |
+        v
 Persistence: new local account "system-utm"
 (09:12:10)
+```
 
 ---
 
@@ -146,10 +186,10 @@ Persistence: new local account "system-utm"
 
 | Tactic | Technique | Description |
 |---|---|---|
-| Credential Access | T1110.001 | Brute Force: Password Guessing — 500 failed SSH attempts against john.smith |
-| Initial Access | T1078 | Valid Accounts — successful authentication using guessed credentials |
-| Privilege Escalation | T1548.003 | Abuse Elevation Control Mechanism: Sudo and Sudo Caching — `su` to root |
-| Persistence | T1136.001 | Create Account: Local Account — `system-utm` created via `useradd` |
+| Credential Access | T1110.001 | Brute Force: Password Guessing - 500 failed SSH attempts against john.smith |
+| Initial Access | T1078 | Valid Accounts - successful authentication using guessed credentials |
+| Privilege Escalation | T1548.003 | Abuse Elevation Control Mechanism: Sudo and Sudo Caching - `su` to root |
+| Persistence | T1136.001 | Create Account: Local Account - `system-utm` created via `useradd` |
 
 ---
 
@@ -157,23 +197,23 @@ Persistence: new local account "system-utm"
 
 Indicators supporting a high-confidence malicious assessment:
 
-- Sustained, high-frequency failed login attempts (500) against a single account from a single source in a short window — a textbook brute force signature, not user error.
-- Only one of four targeted usernames (`john.smith`) was ever authenticated successfully — consistent with credential guessing rather than legitimate access.
-- Privilege escalation to `root` occurred within 8 seconds of the final successful login — too fast to be routine administrative behavior.
-- A new local account was created from an interactive pty session less than a minute after gaining root — consistent with manual, hands-on-keyboard persistence setup rather than automated tooling noise.
+- Sustained, high-frequency failed login attempts (500) against a single account from a single source in a short window - a textbook brute force signature, not user error.
+- Only one of four targeted usernames (`john.smith`) was ever authenticated successfully - consistent with credential guessing rather than legitimate access.
+- Privilege escalation to `root` occurred within 8 seconds of the final successful login - too fast to be routine administrative behavior.
+- A new local account was created from an interactive pty session less than a minute after gaining root - consistent with manual, hands-on-keyboard persistence setup rather than automated tooling noise.
 
 ---
 
 ## Analyst Notes & Caveats
 
 - **Source IP is internal.** `10.10.242.248` is not an internet-facing address, meaning the attacker either already had a foothold inside the network (e.g. compromised VPN, another host) or this traffic was routed through an internal proxy/jump host. The origin of this internal access was not determined in this investigation and requires further scoping.
-- **`ubuntu` account `su` activity confirmed isolated and unrelated.** A full-index 
-  search (`index="linux-alert" sourcetype="linux_secure" | search sudo su`) returns 
-  exactly two `sudo`→`su` events in the entire log source: the `john.smith` escalation 
-  documented above, and a single `ubuntu` → root escalation at 09:10:03 — occurring 
-  **before** john.smith's final successful login (09:11:21) and privilege escalation 
-  (09:11:28). The ubuntu event's timing precludes it from being a follow-on action by 
-  the same attacker session and is treated as unrelated background/administrative 
+- **`ubuntu` account `su` activity confirmed isolated and unrelated.** A full-index
+  search (`index="linux-alert" sourcetype="linux_secure" | search sudo su`) returns
+  exactly two `sudo`->`su` events in the entire log source: the `john.smith` escalation
+  documented above, and a single `ubuntu` -> root escalation at 09:10:03 - occurring
+  **before** john.smith's final successful login (09:11:21) and privilege escalation
+  (09:11:28). The ubuntu event's timing precludes it from being a follow-on action by
+  the same attacker session and is treated as unrelated background/administrative
   activity, though its exact legitimacy was not independently verified.
 - **`david.miller` validity unconfirmed.** Unlike `emma.johnson` and `sarah.williams`, the reviewed evidence did not explicitly confirm whether `david.miller` is a valid or invalid account on this host.
 
@@ -204,7 +244,3 @@ Indicators supporting a high-confidence malicious assessment:
 ## Conclusion
 
 This investigation confirms a high-confidence SSH brute force attack originating from internal IP `10.10.242.248`, targeting the `john.smith` account with 500 failed authentication attempts over approximately 5 minutes before succeeding. Within roughly a minute and a half of the final successful login, the attacker escalated privileges to `root` via `su` and created a new local account (`system-utm`) for persistence. The internal origin of the source IP indicates the attacker already had some level of network access prior to this activity, and determining that initial entry point is the critical next step for the incident response team.
-
-## Evidence
-
-### Brute Force — Failed Authentication
