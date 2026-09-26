@@ -1,4 +1,4 @@
-# Windows Event Log Analysis — RDP Brute Force & Initial Access
+# Windows Event Log Analysis - RDP Brute Force & Initial Access
 
 > **Tool:** Windows Event Viewer
 > **Log Source:** Security Event Log (`RDP-Security.evtx`)
@@ -16,33 +16,33 @@
 | **What** | Sustained RDP brute force against common usernames (Administrator, Admin, User, User1), culminating in a successful Administrator logon over RDP |
 | **When** | Sustained brute force activity throughout the captured log (1,559 failed logon events); confirmed successful logons recorded as 8 total `4624` events |
 | **Where** | Production Windows server `WIN-F89VT9IER10`, with RDP exposed directly to the internet |
-| **Why** | Consistent with opportunistic, automated scanning and credential-guessing against an internet-facing RDP service — a textbook "Ransomware Deployment Protocol" initial access scenario |
+| **Why** | Consistent with opportunistic, automated scanning and credential-guessing against an internet-facing RDP service - a textbook "Ransomware Deployment Protocol" initial access scenario |
 
 ---
 
 ## Detection Logic (Windows Event Viewer)
 
-**Step 1 — Isolate failed logons:**
-Filter Current Log → Event ID `4625`
-→ Returned **1,559 events** out of 1,567 total in the log.
+**Step 1 - Isolate failed logons:**
+Filter Current Log -> Event ID `4625`
+-> Returned **1,559 events** out of 1,567 total in the log.
 
-**Step 2 — Narrow to remote logon types:**
-Within the `4625` results, focus on `LogonType 3` (Network) and `LogonType 10` (RemoteInteractive/RDP) — both consistent with RDP-facing brute force (NLA-enabled RDP typically generates Type 3 during credential negotiation).
+**Step 2 - Narrow to remote logon types:**
+Within the `4625` results, focus on `LogonType 3` (Network) and `LogonType 10` (RemoteInteractive/RDP) - both consistent with RDP-facing brute force (NLA-enabled RDP typically generates Type 3 during credential negotiation).
 
-**Step 3 — Confirm external source:**
-Review the `IpAddress` field on each event — all observed source IPs in this investigation are external/public addresses, confirming the attack originates from outside the network.
+**Step 3 - Confirm external source:**
+Review the `IpAddress` field on each event - all observed source IPs in this investigation are external/public addresses, confirming the attack originates from outside the network.
 
-**Step 4 — Pivot to successful logons:**
-Filter Current Log → Event ID `4624`
-→ Returned **8 events**, a sharp contrast to the 1,559 failures — confirming the vast majority of attempts failed before one succeeded.
+**Step 4 - Pivot to successful logons:**
+Filter Current Log -> Event ID `4624`
+-> Returned **8 events**, a sharp contrast to the 1,559 failures - confirming the vast majority of attempts failed before one succeeded.
 
 ---
 
 ## Investigation
 
-### Stage 1 — Brute Force Against Common Usernames
+### Stage 1 - Brute Force Against Common Usernames
 
-Reviewing `4625` events shows a clear password-guessing pattern: multiple external IPs, each targeting a small set of predictable usernames, all failing with `Status: 0xc000006d` (logon failure — bad username or password):
+Reviewing `4625` events shows a clear password-guessing pattern: multiple external IPs, each targeting a small set of predictable usernames, all failing with `Status: 0xc000006d` (logon failure - bad username or password):
 
 | Source IP | Targeted Username | Logon Type |
 |---|---|---|
@@ -52,34 +52,49 @@ Reviewing `4625` events shows a clear password-guessing pattern: multiple extern
 | 110.39.6.180 | ADMINISTRATOR | 3 |
 | 109.205.213.46 | ADMIN | 3 |
 
-`Administrator` (and case variants) appears as the most frequently targeted account across the full 1,559-event set — consistent with attackers prioritizing the well-known, always-present built-in admin account over guessed/enumerated usernames.
+`Administrator` (and case variants) appears as the most frequently targeted account across the full 1,559-event set - consistent with attackers prioritizing the well-known, always-present built-in admin account over guessed/enumerated usernames.
 
-### Stage 2 — Successful Breach
+<img width="1920" height="829" alt="Zrzut ekranu (434)" src="https://github.com/user-attachments/assets/ec215e48-c56f-4ba3-9761-06973e137bb5" />
+
+
+<img width="1920" height="830" alt="Zrzut ekranu (435)" src="https://github.com/user-attachments/assets/d6920a68-ea7e-433e-a7e9-7bd725dca5db" />
+
+
+<img width="1920" height="830" alt="Zrzut ekranu (436)" src="https://github.com/user-attachments/assets/9033d62c-c257-4d52-9b73-51bda3b757b7" />
+
+
+### Stage 2 - Successful Breach
 
 Two related `4624` (successful logon) events, both from IP **`203.205.34.107`**, confirm the breach:
 
-**Event A — LogonType 10 (RemoteInteractive):**
+**Event A - LogonType 10 (RemoteInteractive):**
 ```
 TargetUserName: Administrator
 LogonType: 10
-WorkstationName: WIN-F89VT9IER10   (local/target machine name — not yet resolved to attacker's real host)
+WorkstationName: WIN-F89VT9IER10   (local/target machine name - not yet resolved to attacker's real host)
 ProcessName: C:\Windows\System32\svchost.exe
 IpAddress: 203.205.34.107
 ```
 
-**Event B — LogonType 3 (Network), same session window:**
+<img width="1920" height="834" alt="Zrzut ekranu (438)" src="https://github.com/user-attachments/assets/3f4a6805-39e2-4ecb-8c65-769b0be69f4e" />
+
+
+**Event B - LogonType 3 (Network), same session window:**
 ```
 TargetUserName: Administrator
 LogonType: 3
-WorkstationName: DESKTOP-QNBC4UU   ← attacker's real hostname
+WorkstationName: DESKTOP-QNBC4UU   <- attacker's real hostname
 AuthenticationPackageName: NTLM
 LmPackageName: NTLM V2
 IpAddress: 203.205.34.107
 ```
 
-The `LogonType 3` event — which accompanies the RDP session as part of NTLM network authentication — is what actually discloses the attacker's **real workstation name**, `DESKTOP-QNBC4UU`, since the `LogonType 10` event alone only reported the target server's own name.
+<img width="1920" height="834" alt="Zrzut ekranu (439)" src="https://github.com/user-attachments/assets/062a16f6-1e21-48aa-8a24-e983d51930ce" />
 
-### Stage 3 — Additional Notable Finding: Same Attacker, Second Source IP
+
+The `LogonType 3` event - which accompanies the RDP session as part of NTLM network authentication - is what actually discloses the attacker's **real workstation name**, `DESKTOP-QNBC4UU`, since the `LogonType 10` event alone only reported the target server's own name.
+
+### Stage 3 - Additional Notable Finding: Same Attacker, Second Source IP
 
 A third `4624` event shows the **same attacker workstation name** (`DESKTOP-QNBC4UU`) authenticating as `Administrator`, but from a **different source IP**:
 
@@ -89,6 +104,9 @@ LogonType: 3
 WorkstationName: DESKTOP-QNBC4UU
 IpAddress: 118.69.32.92
 ```
+
+<img width="1920" height="823" alt="Zrzut ekranu (440)" src="https://github.com/user-attachments/assets/adf60d82-c42d-4762-9b6e-83e7a9d46985" />
+
 
 This is a notable pivot point for further investigation: the same physical/virtual attacker machine (identified by hostname) accessed the target from two distinct public IPs (`203.205.34.107` and `118.69.32.92`), suggesting use of a VPN, proxy rotation, or a multi-hop infrastructure by the threat actor.
 
@@ -108,7 +126,7 @@ This is a notable pivot point for further investigation: the same physical/virtu
 | Failed logon count | 1,559 (Event ID 4625) |
 | Successful logon count | 8 (Event ID 4624) |
 
-**Note on credentials:** per the engagement scenario context, the exposed account was configured with a weak password (`Administrator:Summer2025`). This detail comes from the exercise background, not from the Security log itself — Windows logon events never record the password value, only success/failure.
+**Note on credentials:** per the engagement scenario context, the exposed account was configured with a weak password (`Administrator:Summer2025`). This detail comes from the exercise background, not from the Security log itself - Windows logon events never record the password value, only success/failure.
 
 ---
 
@@ -116,17 +134,17 @@ This is a notable pivot point for further investigation: the same physical/virtu
 
 | Tactic | Technique | Description |
 |---|---|---|
-| Credential Access | T1110.001 | Brute Force: Password Guessing — 1,559 failed logons against predictable usernames |
-| Initial Access | T1133 | External Remote Services — RDP exposed directly to the internet, used as the entry point |
-| Initial Access | T1078 | Valid Accounts — successful authentication as `Administrator` following credential guessing |
+| Credential Access | T1110.001 | Brute Force: Password Guessing - 1,559 failed logons against predictable usernames |
+| Initial Access | T1133 | External Remote Services - RDP exposed directly to the internet, used as the entry point |
+| Initial Access | T1078 | Valid Accounts - successful authentication as `Administrator` following credential guessing |
 
 ---
 
 ## Analyst Notes & Caveats
 
-- **Network scanning stage not covered.** The reconnaissance step (botnet identifying the exposed RDP port) precedes any Windows Security log evidence and is out of scope for this log source — it would require perimeter/firewall/NetFlow data to investigate.
-- **"WorkstationName" differs by logon type.** The `LogonType 10` (RDP session) event reported the *target* server's own name, not the attacker's. The attacker's real hostname only surfaced via the accompanying `LogonType 3` (NTLM network logon) event — a useful pattern to remember when hunting for attacker infrastructure in RDP breach logs.
-- **Two source IPs, one attacker hostname.** This was not explicitly investigated further in this report (no Sysmon/network data was reviewed alongside it), but is flagged as a lead worth pursuing in a full incident response — e.g. checking whether `118.69.32.92` and `203.205.34.107` share ASN/hosting provider, indicating shared attacker infrastructure.
+- **Network scanning stage not covered.** The reconnaissance step (botnet identifying the exposed RDP port) precedes any Windows Security log evidence and is out of scope for this log source - it would require perimeter/firewall/NetFlow data to investigate.
+- **"WorkstationName" differs by logon type.** The `LogonType 10` (RDP session) event reported the *target* server's own name, not the attacker's. The attacker's real hostname only surfaced via the accompanying `LogonType 3` (NTLM network logon) event - a useful pattern to remember when hunting for attacker infrastructure in RDP breach logs.
+- **Two source IPs, one attacker hostname.** This was not explicitly investigated further in this report (no Sysmon/network data was reviewed alongside it), but is flagged as a lead worth pursuing in a full incident response - e.g. checking whether `118.69.32.92` and `203.205.34.107` share ASN/hosting provider, indicating shared attacker infrastructure.
 
 ---
 
@@ -144,4 +162,4 @@ This is a notable pivot point for further investigation: the same physical/virtu
 
 ## Conclusion
 
-This investigation confirms a successful RDP breach against `WIN-F89VT9IER10`, preceded by a sustained brute force campaign (1,559 failed login attempts) targeting common usernames, with `Administrator` as the primary target. The attacker successfully authenticated from `203.205.34.107`, with their real workstation name (`DESKTOP-QNBC4UU`) recovered from the accompanying NTLM network logon event. The same attacker hostname was also observed authenticating from a second IP (`118.69.32.92`), suggesting the use of rotating or proxied infrastructure. This pattern — internet-facing RDP, weak/guessable credentials, and rapid automated brute forcing — is one of the most common initial access vectors behind ransomware incidents, and warrants immediate remediation of the exposed service.
+This investigation confirms a successful RDP breach against `WIN-F89VT9IER10`, preceded by a sustained brute force campaign (1,559 failed login attempts) targeting common usernames, with `Administrator` as the primary target. The attacker successfully authenticated from `203.205.34.107`, with their real workstation name (`DESKTOP-QNBC4UU`) recovered from the accompanying NTLM network logon event. The same attacker hostname was also observed authenticating from a second IP (`118.69.32.92`), suggesting the use of rotating or proxied infrastructure. This pattern - internet-facing RDP, weak/guessable credentials, and rapid automated brute forcing - is one of the most common initial access vectors behind ransomware incidents, and warrants immediate remediation of the exposed service.
