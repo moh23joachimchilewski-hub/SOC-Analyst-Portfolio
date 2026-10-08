@@ -41,6 +41,17 @@ Domyślnie serwis PsExec nazywa się `PSEXESVC`. Flaga `-r` pozwala go przemiano
 To jest sygnatura, której szuka się zamiast nazwy. Dodatkowo named pipe'y PsExec zachowują schemat `<nazwa>-<hostname_źródła>-<pid>-stdin/stdout/stderr` - i to właśnie one zdradziły maszynę źródłową.
 
 ---
+ 
+## Użyte Event ID (ściąga)
+ 
+| Event ID | Źródło logu | Znaczenie | Rola w tym incydencie |
+|---|---|---|---|
+| **7045** | System | A New Service Was Installed | sygnatura PsExec - serwis `svcupdate`, user mode service + demand start, LocalSystem |
+| **5140** | Security | A network share object was accessed | dostęp do `ADMIN$` z `10.5.50.15` kontem `ryan.chen` |
+| **5145** | Security | Detailed File Share | nazwy named pipe'ów (`svcupdate-THM-HR-WS-5104-*`) zdradzające host źródłowy |
+| **1** (Sysmon) | Sysmon | Process Creation | komendy odpalone przez serwis (`ParentImage=svcupdate.exe`) |
+ 
+---
 
 ## 5W
 
