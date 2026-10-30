@@ -228,3 +228,14 @@ tcp.stream eq 10464
 | Valid Accounts | T1078 | logowanie do MySQL kontem `webuser` |
 | Ingress Tool Transfer | T1105 | pobranie `booking.php` z `203.0.113.15` |
 | Server Software Component: Web Shell | T1505.003 | webshell `booking.php` |
+
+<img width="1021" height="225" alt="Zrzut ekranu (1283)" src="https://github.com/user-attachments/assets/bff3f559-10ff-4189-9c6c-8e3d14f8e991" />
+<img width="1006" height="228" alt="Zrzut ekranu (1290)" src="https://github.com/user-attachments/assets/1404e50c-75fe-482a-9f1a-ee4c36a44f63" />
+<img width="1045" height="222" alt="Zrzut ekranu (1291)" src="https://github.com/user-attachments/assets/e94d9a3f-0559-47e7-b73c-d0b4252550d2" />
+<img width="1056" height="267" alt="Zrzut ekranu (1293)" src="https://github.com/user-attachments/assets/05d53ee1-c09f-44f2-9097-ee526bf75562" />
+<img width="1017" height="191" alt="Zrzut ekranu (1297)" src="https://github.com/user-attachments/assets/f351449d-4e6e-4e4d-b6a5-74193221c667" />
+<img width="1020" height="251" alt="Zrzut ekranu (1299)" src="https://github.com/user-attachments/assets/c5357012-1540-4905-8621-496ccd7f787d" />
+<img width="1011" height="230" alt="Zrzut ekranu (1300)" src="https://github.com/user-attachments/assets/e3fc8a87-935d-46d0-a400-01cda421c321" />
+
+
+
