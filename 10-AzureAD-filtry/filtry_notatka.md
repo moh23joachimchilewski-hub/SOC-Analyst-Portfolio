@@ -1,11 +1,11 @@
 # Notatka: Splunk - logi Entra ID (Azure AD) i Microsoft 365
 
 > **Źródło:** notatki z TryHackMe (filtry z labu) + uzupełnienia oznaczone jako *(dodane)*
-> **Cel:** szybkie wykrywanie password spray / brute force, ataków na MFA i sesję (fatigue, SIM swap, AiTM, impossible travel), przejęcia konta i działań po przejęciu (zmiany w koncie, reguły poczty)
+> **Cel:** szybkie wykrywanie password spray / brute force, ataków na MFA i sesję (fatigue, SIM swap, AiTM, impossible travel), przejęcia konta i działań po przejęciu (zmiany w koncie, reguły poczty, phishing z przejętego konta)
 
 ---
 
-## 1. Pięć źródeł logów
+## 1. Sześć źródeł logów
 
 | sourcetype | Co zawiera | Kluczowe pola |
 |---|---|---|
@@ -14,6 +14,7 @@
 | `o365:management:activity` | **Aktywność w M365** (poczta, SharePoint, OneDrive) | `Operation`, `UserId`, `ClientIP` / `ClientIPAddress`, `Workload`, `ObjectId` |
 | `azure:aad:identity_protection:riskdetection` | **Wykrycia ryzyka** (impossible travel, anonimowe IP itd.) | `riskEventType`, `riskLevel`, `userPrincipalName`, `ipAddress`, `activity` |
 | `azure:aad:identity_protection:risky_user` | **Użytkownicy oznaczeni jako ryzykowni** | `riskLevel`, `riskState`, `riskDetail`, `userPrincipalName` |
+| `o365:reporting:messagetrace` | **Śledzenie wiadomości** (kto do kogo, status) | `Received`, `SenderAddress`, `RecipientAddress`, `Subject`, `Status`, `FromIP` |
 
 Dobra kolejność analizy: **signin** (kto i skąd się logował) -> **identity_protection** (czy Microsoft oznaczył ryzyko) -> **audit** (co zmieniono w koncie) -> **o365** (co zrobiono w poczcie i plikach).
 
@@ -28,6 +29,7 @@ Dobra kolejność analizy: **signin** (kto i skąd się logował) -> **identity_
 | `50053` | Konto zablokowane (zbyt wiele nieudanych prób) | trwa atak na hasło |
 | `50074` | Wymagane MFA, nie zostało podane | **hasło mogło być poprawne**, brakuje drugiego składnika |
 | `50055` | Hasło wygasło | zwykle zdarzenie administracyjne |
+| `50140` | Przerwanie logowania monitem „Keep me signed in" (KMSI) | **nieszkodliwe**, po poprawnym uwierzytelnieniu; szum w filtrach `errorCode!=0` |
 
 *(dodane, zweryfikuj w dokumentacji Microsoft)*: `50076` (MFA wymagane przez politykę), `50034` (użytkownik nie istnieje), `50057` (konto wyłączone), `53003` (zablokowane przez Conditional Access).
 
@@ -173,6 +175,162 @@ index="scenario" sourcetype="o365:management:activity" UserId="<ADD-USER-EMAIL>"
 - **MITRE:** T1114.003 (Email Forwarding Rule), T1564.008 (Email Hiding Rules), T1530 (Data from Cloud Storage).
 - **Patrz na:** `Operation` = `New-InboxRule`, `Set-Mailbox` (przekierowanie), `FileAccessed`/`FileDownloaded` w dużej liczbie; `sourceIP` inne niż zwykle użytkownika.
 - `coalesce` jest potrzebne, bo różne typy zdarzeń używają innej nazwy pola z IP.
+
+---
+
+### 5.3 Reguły skrzynki (inbox rules) - T1564.008, T1114.003
+
+```spl
+index="task6" sourcetype="o365:management:activity" UserId="<ADD-USER-EMAIL>" Operation="New-InboxRule"
+```
+
+Szczegóły reguły są w polu `Parameters` jako lista par `Name` / `Value`. Jak to czytać:
+
+| Parametr | Znaczenie | Na co uważać |
+|---|---|---|
+| `Name` | nazwa reguły | neutralne nazwy typu „Maintenance", „Sync" (maskowanie) |
+| `SubjectContainsWords`, `From`, `BodyContainsWords` | **warunek** (które wiadomości) | słowa typu „Alert", „Security", „Password", nazwy IT/banku |
+| `DeleteMessage` = True | usuwa wiadomość | ukrywanie ostrzeżeń przed ofiarą |
+| `MarkAsRead` = True | oznacza jako przeczytaną | ukrywanie |
+| `MoveToFolder` | przenosi do folderu | np. RSS, Archiwum, Notatki |
+| `ForwardTo` / `RedirectTo` | przekierowanie poczty | **kradzież korespondencji** (T1114.003) |
+| `StopProcessingRules` = True | kończy dalsze reguły | inne reguły nie zadziałają |
+| `AlwaysDeleteOutlookRulesBlob`, `Force` | parametry techniczne | zwykle `False`, bez znaczenia |
+
+- **Dwa cele atakującego:** ukrycie ostrzeżeń (usuń/oznacz/przenieś) albo kradzież poczty (przekierowanie). Reguła z `DeleteMessage` bez `ForwardTo` to ukrywanie, a nie kradzież.
+- **Patrz też na:** `ClientIP` (czy to IP użytkownika), czas względem podejrzanego logowania, `Set-InboxRule` i `Set-Mailbox` (przekierowanie na poziomie skrzynki) *(dodane)*.
+- **Reakcja:** usunięcie reguły (`Remove-InboxRule`), reset hasła, unieważnienie sesji, przegląd przekierowań i metod MFA.
+
+### 5.4 Phishing z przejętego konta: kto otworzył i kto odpowiedział
+
+Przykład z labu: z przejętego konta wysłano wiadomość „Action Required: Password Reset" z IP atakującego.
+
+**Wysyłka phishingu:**
+```spl
+index="task6" sourcetype="o365:management:activity" Operation="Send" "Action Required: Password Reset"
+| table _time, UserId, Operation, ClientIP, ClientIPAddress
+| sort _time
+```
+
+**Kto odpowiedział:** operacja `Send` od **innego** użytkownika, z tematem zaczynającym się od `RE:`:
+```spl
+index="task6" sourcetype="o365:management:activity" Operation="Send" "RE: Action Required: Password Reset"
+| table _time, UserId, Item.Subject, ClientIP, ClientIPAddress
+| sort _time
+```
+
+**Kto tylko otworzył:** `Operation="MailItemsAccessed"` z tym samym tematem.
+
+- **`MailItemsAccessed`** = ktoś **odczytał** wiadomość (nie odpowiedział). **`Send`** = ktoś **wysłał** wiadomość, w tym odpowiedź. Osobnej operacji „Reply" w audycie skrzynki nie ma *(z mojej wiedzy)*.
+- Nazwa pola z tematem zależy od danych (`Item.Subject`, `Subject`...), sprawdź w rozwiniętym zdarzeniu.
+- Porównaj `ClientIP` odpowiedzi z IP atakującego: inne IP = zwykły użytkownik, to samo = przejęte także to konto.
+
+### 5.5 Message trace a audyt skrzynki
+
+| | Message trace | Audyt skrzynki (`Send`, `MailItemsAccessed`) |
+|---|---|---|
+| Pokazuje | nadawca, odbiorcy, temat, czas, status dostarczenia, rozmiar | kto wykonał akcję, IP klienta, temat, identyfikator wiadomości |
+| **Treść wiadomości** | nie | nie |
+
+Treść wymaga **Microsoft Purview (Content Search / eDiscovery)** lub dostępu do skrzynki, czyli zwykle prośby do administratora klienta. W raporcie napisz wprost, czego logi nie pozwalają ustalić (np. czy odpowiedź zawierała dane logowania). **Rozmiar odpowiedzi nie dowodzi niczego o treści.** Użytkownika, który odpowiedział na phishing, traktuj jako potencjalnie zagrożonego (reset hasła, unieważnienie sesji, przegląd logowań i reguł).
+
+### 5.6 Exchange Online: logowania do OWA
+
+```spl
+index=* sourcetype="azure:aad:signin" appDisplayName="One Outlook Web"
+| table _time userPrincipalName appDisplayName ipAddress location.city status.errorCode
+| sort - _time
+```
+
+- **Wykrywa:** kto loguje się do poczty przez przeglądarkę (Outlook Web) i skąd. Atakujący po przejęciu konta często wchodzi właśnie tędy.
+- **Patrz na:** nowe IP/miasto, błędy tuż przed sukcesem, logowania poza godzinami pracy.
+
+### 5.7 Exchange Online: kluczowe operacje w audycie
+
+```spl
+index=* sourcetype="o365:management:activity" Workload=Exchange
+| table _time UserId Operation Workload
+```
+
+`Workload` mówi, która usługa M365 wygenerowała zdarzenie (dla Exchange zawsze `Exchange`), a `Operation` mówi, co dokładnie zrobiono.
+
+| Operation | Co oznacza | Dlaczego ważne |
+|---|---|---|
+| `MailItemsAccessed` | ktoś odczytał wiadomości w skrzynce | czy atakujący czytał wrażliwą pocztę po przejęciu |
+| `Send` | wysłano wiadomość ze skrzynki | phishing wysyłany z przejętego konta wewnętrznego |
+| `New-InboxRule` | utworzono nową regułę skrzynki | ukrywanie odpowiedzi lub przekierowanie poczty |
+| `Set-InboxRule` | zmieniono istniejącą regułę | zmiana reguły zamiast tworzenia nowej, żeby uniknąć wykrycia |
+| `Set-Mailbox` | zmieniono ustawienia skrzynki, m.in. **przekierowanie** | ciche przekierowanie na zewnętrzny adres |
+| `Add-MailboxPermission` | nadano komuś dostęp delegowany do skrzynki | **trwałość** (T1098.002): atakujący może wrócić po resecie hasła |
+
+### 5.8 Reguły skrzynki: New-InboxRule i Set-InboxRule
+
+```spl
+index=* Workload=Exchange Operation=New-InboxRule
+| table _time UserId Name DeleteMessage ForwardTo SubjectContainsWords
+```
+
+(Dla zmian istniejących reguł użyj `Operation=Set-InboxRule`.)
+
+| Pole | Rola |
+|---|---|
+| `Name` | nazwa reguły |
+| `SubjectContainsWords` | **warunek:** temat zawiera podane słowa |
+| `DeleteMessage` | **akcja:** `True` = pasujące wiadomości są usuwane |
+| `ForwardTo` | **akcja:** przekierowanie na podany adres |
+
+**Czerwone flagi:** `DeleteMessage = True` (rzadko uzasadnione, zawsze sprawdzaj), `ForwardTo` na domenę zewnętrzną, reguły tworzone lub zmieniane poza godzinami pracy, generyczne/systemowe nazwy reguł.
+
+### 5.9 Przekierowanie na poziomie skrzynki: Set-Mailbox - T1114.003
+
+```spl
+index=* Workload=Exchange Operation=Set-Mailbox
+| table _time UserId ForwardingSmtpAddress DeliverToMailboxAndForward
+```
+
+**Czerwone flagi:**
+- `ForwardingSmtpAddress` na domenę zewnętrzną (Gmail, ProtonMail itp.),
+- **`DeliverToMailboxAndForward = False`** = ofiara nie zobaczy poczty nawet we własnej skrzynce, wszystko idzie po cichu do atakującego,
+- przekierowanie skonfigurowane niedługo po podejrzanym logowaniu.
+
+### 5.10 Odczyt poczty: MailItemsAccessed
+
+```spl
+index=* Workload=Exchange Operation=MailItemsAccessed
+| table _time UserId ClientIPAddress OperationCount
+```
+
+**Czerwone flagi:** zdarzenia z nietypowego IP/lokalizacji, **wysoki `OperationCount`** (duża liczba przeczytanych wiadomości), dostęp poza godzinami pracy.
+
+### 5.11 Wysyłka: Send
+
+```spl
+index=* Workload=Exchange Operation=Send
+| table _time UserId Item.Subject ClientIP SaveToSentItems
+```
+
+| Pole | Opis |
+|---|---|
+| `UserId` | konto, z którego wysłano wiadomość |
+| `Item.Subject` | temat |
+| `Item.SizeInBytes` | rozmiar |
+| `ClientIP` | IP, z którego wysłano |
+| `SaveToSentItems` | czy zapisano w Wysłanych |
+
+**Czerwone flagi:** duża liczba `Send` w krótkim czasie, **`SaveToSentItems = False`** (atakujący ukrywa wysłane wiadomości), `ClientIP` inne niż zwykłe IP ofiary, podejrzane tematy (faktury, reset hasła, pilne prośby).
+
+### 5.12 Message trace: kto dostał wiadomość
+
+`Send` pokazuje, że wiadomość wysłano i jaki miała temat, ale **nie pokazuje odbiorców**. Zasięg kampanii (ilu odbiorców, czy dostarczono) sprawdzasz w message trace.
+
+```spl
+index=* sourcetype="o365:reporting:messagetrace"
+| table Received SenderAddress RecipientAddress Subject Status FromIP
+```
+
+**Czerwone flagi:** wielu odbiorców tej samej wiadomości z przejętego konta w krótkim czasie, **`Status = Delivered`** (phishing dotarł do skrzynki), odbiorcy z różnych działów (szeroka kampania).
+
+*(dodane)* Zamiast `index=*` wpisz konkretny indeks, bo `index=*` przeszukuje wszystko i jest wolne.
 
 ---
 
@@ -414,6 +572,12 @@ activityDisplayName="Consent to application"
 | Trwałość przez MFA | `User started security info registration` | 9.3 |
 | Nadużycie zgód | `Consent to application` | 9.4 |
 | Działania w poczcie | `New-InboxRule`, przekierowania | 5.2 |
+| Reguły ukrywające/przekierowujące pocztę | `New-InboxRule` z `DeleteMessage`/`ForwardTo` | 5.3 |
+| Phishing z przejętego konta | `Send` z IP atakującego; odpowiedzi `RE:` od innych | 5.4 / 5.11 |
+| Zasięg phishingu (kto dostał) | message trace, `Status = Delivered` | 5.12 |
+| Ciche przekierowanie poczty | `Set-Mailbox` z `ForwardingSmtpAddress`, `DeliverToMailboxAndForward = False` | 5.9 |
+| Trwały dostęp do skrzynki | `Add-MailboxPermission` | 5.7 |
+| Czytanie poczty po przejęciu | `MailItemsAccessed`, wysoki `OperationCount` | 5.10 |
 
 ---
 
@@ -423,7 +587,7 @@ activityDisplayName="Consent to application"
 2. **3.2 / 3.6** - czy któreś konto zalogowało się z tego IP **udanie**? (`errorCode=0`)
 3. **Weryfikacja logowania:** czy było MFA i skąd? (**3.5**, **8.4** - kraje i czasy), czy Identity Protection oznaczył ryzyko (**7.1**, **7.3**), co zrobiły polityki dostępu warunkowego (**6.1**). To rozróżnia przejęcie konta, SIM swap i AiTM.
 4. **4.1 / 4.2 / 9.1-9.4** - co zmieniono w tym koncie i co ono zmieniło (MFA, role, nowe konta, zgody aplikacji)?
-5. **5.2** - co zrobiono w poczcie i plikach (reguły, przekierowania, pobrania)?
+5. **5.2 / 5.8-5.12** - co zrobiono w poczcie i plikach (reguły, przekierowania, odczyt, wysyłka phishingu i jego zasięg w message trace)?
 
 Wynik na kroku 2 jest punktem decyzji: bez udanego logowania to nieudany atak (zablokować IP, monitorować), z udanym to incydent (reset hasła, unieważnienie sesji, sprawdzenie kroków 3-5).
 
