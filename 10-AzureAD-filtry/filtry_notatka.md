@@ -1,11 +1,11 @@
 # Notatka: Splunk - logi Entra ID (Azure AD) i Microsoft 365
 
 > **Źródło:** notatki z TryHackMe (filtry z labu) + uzupełnienia oznaczone jako *(dodane)*
-> **Cel:** szybkie wykrywanie password spray / brute force, ataków na MFA i sesję (fatigue, SIM swap, AiTM, impossible travel), przejęcia konta i działań po przejęciu (zmiany w koncie, reguły poczty, phishing z przejętego konta)
+> **Cel:** szybkie wykrywanie password spray / brute force, ataków na MFA i sesję (fatigue, SIM swap, AiTM, impossible travel), przejęcia konta i działań po przejęciu (zmiany w koncie, reguły poczty, phishing z przejętego konta, nadużycie SharePointa i Intune)
 
 ---
 
-## 1. Sześć źródeł logów
+## 1. Siedem źródeł logów
 
 | sourcetype | Co zawiera | Kluczowe pola |
 |---|---|---|
@@ -15,6 +15,7 @@
 | `azure:aad:identity_protection:riskdetection` | **Wykrycia ryzyka** (impossible travel, anonimowe IP itd.) | `riskEventType`, `riskLevel`, `userPrincipalName`, `ipAddress`, `activity` |
 | `azure:aad:identity_protection:risky_user` | **Użytkownicy oznaczeni jako ryzykowni** | `riskLevel`, `riskState`, `riskDetail`, `userPrincipalName` |
 | `o365:reporting:messagetrace` | **Śledzenie wiadomości** (kto do kogo, status) | `Received`, `SenderAddress`, `RecipientAddress`, `Subject`, `Status`, `FromIP` |
+| `o365:graph:intune` | **Akcje w Intune** (wipe, skrypty platformowe); *sourcetype własny w labie* | `activityType`, `actor.userPrincipalName`, `resources{}.modifiedProperties{}.newValue`, `resources{}.resourceId` |
 
 Dobra kolejność analizy: **signin** (kto i skąd się logował) -> **identity_protection** (czy Microsoft oznaczył ryzyko) -> **audit** (co zmieniono w koncie) -> **o365** (co zrobiono w poczcie i plikach).
 
@@ -332,6 +333,52 @@ index=* sourcetype="o365:reporting:messagetrace"
 
 *(dodane)* Zamiast `index=*` wpisz konkretny indeks, bo `index=*` przeszukuje wszystko i jest wolne.
 
+### 5.13 SharePoint i OneDrive: operacje na plikach
+
+Wszystkie zdarzenia plikowe są w `o365:management:activity` z `Workload=SharePoint` (lub `OneDrive`).
+
+| Operation | Do czego służy |
+|---|---|
+| `FileCreated` / `FileUploaded` | śledzenie podejrzanych plików wgrywanych do SharePointa |
+| `FileDeleted` / `FileRecycled` | audyt i zgodność (ktoś usuwa ślady lub dane) |
+| `FileAccessed` / `FileDownloaded` | przydatne w wielu incydentach (przeglądanie i wyniesienie danych) |
+
+```spl
+index=* Workload=SharePoint UserId="emma*" Operation IN (FileAccessed, FileDownloaded)
+| table _time UserId Operation ClientIP SourceFileName ObjectId
+| sort _time
+```
+
+- **Przejrzenie zasobów** to seria `FileAccessed` z jednego IP, a **wyniesienie pliku** to `FileDownloaded`.
+- **Patrz na:** `ClientIP` atakującego (odfiltruj normalne IP użytkownika), rozszerzenia plików (`.pptx`, `.xlsx`), nazwę w `SourceFileName`.
+
+### 5.14 SharePoint: udostępnianie plików
+
+```spl
+index=* Workload=SharePoint Operation IN(AddedToSecureLink, AnonymousLinkCreated)
+```
+
+```spl
+index=* Workload=SharePoint Operation IN(SecureLinkUsed, AnonymousLinkUsed)
+```
+
+| Operation | Znaczenie |
+|---|---|
+| `AddedToSecureLink` | osoba dodana do linku z ograniczonym dostępem |
+| `AnonymousLinkCreated` | utworzono link dostępny dla każdego |
+| `SecureLinkUsed` / `AnonymousLinkUsed` | ktoś **użył** linku (otworzył plik) |
+
+- **Patrz na:** czy plik udostępniono osobom spoza organizacji, oraz kto użył linku (`*LinkUsed`).
+
+### 5.15 Reakcja na nadużycie SharePointa (złośliwy plik udostępniony z przejętego konta)
+
+| # | Działanie | Przykład w Splunku |
+|---|---|---|
+| 1 | Znaleźć i poddać kwarantannie złośliwy plik | brak zapytania (nazwę pliku odczytaj z maila z udostępnieniem) |
+| 2 | Zidentyfikować i wyłączyć "pacjenta zero" (konto, które wgrało plik) | `index=m365 Operation IN(FileUploaded, FileCreated) ObjectId=*BADFILE*` `| table _time UserId Operation ObjectId` |
+| 3 | Zidentyfikować i powiadomić użytkowników, którym plik udostępniono | `index=m365 Operation IN(AddedToSecureLink, SharingSet) ObjectId=*BADFILE*` `| table _time UserId TargetUserOrGroupName ObjectId` |
+| 4 | Skontaktować się (np. telefonicznie) z tymi, którzy już otworzyli plik | `index=m365 Operation IN(*LinkUsed, FileAccessed) ObjectId=*BADFILE*` `| stats values(UserId)` |
+
 ---
 
 ## 6. Zasady dostępu warunkowego (CAP) w logach logowań
@@ -554,6 +601,44 @@ activityDisplayName="Consent to application"
 - **Wykrywa:** udzielenie aplikacji uprawnień do danych (pocztę, pliki). Atakujący może użyć takiej aplikacji jako dostępu, który **przeżyje reset hasła**.
 - **Patrz na:** nieznane nazwy aplikacji, szerokie uprawnienia (`Mail.Read`, `Files.ReadWrite.All`, `offline_access`).
 
+### 9.5 Logowania do Intune z niezarządzanych urządzeń
+
+```spl
+index=intune sourcetype=azure:aad:signin appDisplayName=*Intune* deviceDetail.displayName=""
+| rename deviceDetail.* as dvc.*
+| table _time appDisplayName ipAddress dvc.isManaged dvc.isCompliant dvc.displayName user
+```
+
+- **Wykrywa:** logowanie do konsoli Intune z urządzenia bez nazwy, czyli niezarejestrowanego i niezarządzanego. Administrator zwykle loguje się ze swojej zarządzanej stacji.
+- **Patrz na:** `ipAddress` (czy to IP atakującego), `dvc.isManaged` i `dvc.isCompliant` (`false`), konto, które się logowało.
+
+### 9.6 Zdalne wyczyszczenie urządzenia (wipe) - T1485, T1529
+
+Po przejęciu konta z uprawnieniami Intune atakujący może zdalnie wyczyścić urządzenia (niszczenie danych, utrudnianie analizy).
+
+```spl
+index=intune sourcetype="o365:graph:intune" wipe
+| eval deviceid=mvindex('resources{}.modifiedProperties{}.newValue', 0)
+| table _time activityType actor.userPrincipalName deviceid
+```
+
+- **Patrz na:** kto wykonał (`actor.userPrincipalName`), `deviceid` (ID wyczyszczonego urządzenia), czas względem podejrzanego logowania. Nazwę (hostname) urządzenia znajdź, szukając tego `deviceid` w innych logach.
+
+### 9.7 Skrypty platformowe Intune - T1072
+
+Skrypty platformowe uruchamiają kod na zarządzanych urządzeniach, więc dla atakującego z dostępem do Intune to sposób na wykonanie kodu na wielu stacjach naraz.
+
+```spl
+index=intune sourcetype="o365:graph:intune" activityType=*DeviceManagementScript*
+| eval action=mvindex(split(activityType, " "), 0)
+| eval script='resources{}.resourceId'
+| eval target=mvindex('resources{}.modifiedProperties{}.newValue', 0)
+| eval target=if(action="assignDeviceManagementScript", target, "N/A")
+| table _time actor.userPrincipalName action script target
+```
+
+- **Patrz na:** utworzenie skryptu (`create...`), a zwłaszcza **przypisanie** go do grupy urządzeń (`assignDeviceManagementScript`), oraz kto to zrobił.
+
 ---
 
 ## 10. Ściąga: atak -> sygnał w logach
@@ -578,6 +663,11 @@ activityDisplayName="Consent to application"
 | Ciche przekierowanie poczty | `Set-Mailbox` z `ForwardingSmtpAddress`, `DeliverToMailboxAndForward = False` | 5.9 |
 | Trwały dostęp do skrzynki | `Add-MailboxPermission` | 5.7 |
 | Czytanie poczty po przejęciu | `MailItemsAccessed`, wysoki `OperationCount` | 5.10 |
+| Wyniesienie plików z SharePointa | `FileDownloaded` z IP atakującego | 5.13 |
+| Rozsyłanie złośliwego pliku | `AddedToSecureLink`, `AnonymousLinkCreated`, `*LinkUsed` | 5.14 / 5.15 |
+| Dostęp do Intune z obcego urządzenia | logowanie do Intune z `deviceDetail.displayName=""` | 9.5 |
+| Zdalny wipe urządzeń | `wipe` w `o365:graph:intune` | 9.6 |
+| Wykonanie kodu przez Intune | `assignDeviceManagementScript` | 9.7 |
 
 ---
 
@@ -586,8 +676,8 @@ activityDisplayName="Consent to application"
 1. **3.4** - które IP atakuje wiele kont (spray)? Przy atakach na MFA dodatkowo **8.1** (wiele błędów `50074`/`50076`/`500121`).
 2. **3.2 / 3.6** - czy któreś konto zalogowało się z tego IP **udanie**? (`errorCode=0`)
 3. **Weryfikacja logowania:** czy było MFA i skąd? (**3.5**, **8.4** - kraje i czasy), czy Identity Protection oznaczył ryzyko (**7.1**, **7.3**), co zrobiły polityki dostępu warunkowego (**6.1**). To rozróżnia przejęcie konta, SIM swap i AiTM.
-4. **4.1 / 4.2 / 9.1-9.4** - co zmieniono w tym koncie i co ono zmieniło (MFA, role, nowe konta, zgody aplikacji)?
-5. **5.2 / 5.8-5.12** - co zrobiono w poczcie i plikach (reguły, przekierowania, odczyt, wysyłka phishingu i jego zasięg w message trace)?
+4. **4.1 / 4.2 / 9.1-9.4** - co zmieniono w tym koncie i co ono zmieniło (MFA, role, nowe konta, zgody aplikacji, wipe i skrypty w Intune: **9.5-9.7**)?
+5. **5.2 / 5.8-5.15** - co zrobiono w poczcie i plikach (reguły, przekierowania, odczyt, wysyłka phishingu i jego zasięg w message trace, pobrania i udostępnianie w SharePoint)?
 
 Wynik na kroku 2 jest punktem decyzji: bez udanego logowania to nieudany atak (zablokować IP, monitorować), z udanym to incydent (reset hasła, unieważnienie sesji, sprawdzenie kroków 3-5).
 
