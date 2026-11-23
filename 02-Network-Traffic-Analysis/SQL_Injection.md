@@ -78,7 +78,7 @@ Zaobserwowane rodzaje payloadów:
 |---|---|---|
 | Sonda z apostrofem | `search=book%27` | `500 Internal Server Error` (nieobsłużony błąd SQL, wejście trafia do zapytania) |
 | Test logiczny | `search=book and 1=1; -- -` | `200 OK` |
-| Tautologia | `search=' or 1=1; -- -` | `200 OK`, pakiet odpowiedzi większy niż zwykle (722 B wobec 462 B przy zwykłych wyszukiwaniach) |
+| Warunek zawsze prawdziwy (or 1=1) | `search=' or 1=1; -- -` | `200 OK`, pakiet odpowiedzi większy niż zwykle (722 B wobec 462 B przy zwykłych wyszukiwaniach) |
 | Testy automatu | `book' AND 7459=3526 AND 'PyAo'='PyAo` i podobne | `200` lub `500` zależnie od payloadu |
 | Oparte na błędzie | `EXTRACTVALUE(...)` | m.in. `500` |
 | UNION | `book' UNION ALL SELECT NULL,CONCAT(...)` | `200 OK` |
